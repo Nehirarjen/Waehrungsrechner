@@ -66,43 +66,7 @@ fetch_rates() {
 #             $3 = Richtung (UP oder DOWN)
 # RÜCKGABE:   Exit-Code 0=gesendet / 1=Fehler
 # =============================================================
-send_alert() {
-    local currency="$1"
-    local change="$2"
-    local direction="$3"
-    local emoji="📈"
-    [[ "$direction" == "DOWN" ]] && emoji="📉"
 
-    local message="${emoji} SafeSync ALERT: ${currency} hat sich um ${change}% verändert! Richtung: ${direction}"
-
-    log_status "INFO" "Sende Alert für ${currency}: ${change}%"
-
-    # --- Methode A: Discord Webhook ---
-    if [[ -n "$DISCORD_WEBHOOK" ]]; then
-        local payload="{\"content\": \"${message}\"}"
-        curl -s -X POST -H "Content-Type: application/json" \
-             -d "$payload" "$DISCORD_WEBHOOK" > /dev/null
-
-        if [[ $? -eq 0 ]]; then
-            log_status "OK" "Discord-Alert gesendet für ${currency}"
-        else
-            log_status "NotOK" "Discord-Alert fehlgeschlagen für ${currency}"
-            return 1
-        fi
-    fi
-
-    # --- Methode B: E-Mail via mailx ---
-    if [[ -n "$ALERT_MAIL" ]]; then
-        echo "$message" | mailx -s "SafeSync Alert: ${currency}" "$ALERT_MAIL"
-        if [[ $? -eq 0 ]]; then
-            log_status "OK" "Mail-Alert gesendet an ${ALERT_MAIL}"
-        else
-            log_status "NotOK" "Mail-Alert fehlgeschlagen"
-        fi
-    fi
-
-    return 0
-}
 
 # =============================================================
 # FUNKTION:   check_thresholds
@@ -114,6 +78,32 @@ send_alert() {
 # =============================================================
 check_thresholds() {
     local csv_file="$(dirname "$0")/data/kurse_history.csv"
+send_alert() {
+    local curr=$1
+    local diff=$2
+    local dir=$3
+    local val=${RATES[$curr]}
+    
+    local subject="[SafeSync] Markt-Alarm: $curr ist $dir ($diff%)"
+    local body="Achtung: Der Kurs von $curr hat sich signifikant verändert.
+    
+Währung: $curr
+Richtung: $dir
+Veränderung: $diff%
+Aktueller Kurs: $val CHF
+
+Zeitpunkt: $(date '+%d.%m.%Y %H:%M:%S')
+Dies ist eine automatisierte Nachricht von SafeSync."
+
+    # Versand-Befehl
+    echo "$body" | mailx -s "$subject" "$ALERT_MAIL"
+    
+    if [[ $? -eq 0 ]]; then
+        log_status "OK" "E-Mail-Alert für $curr erfolgreich versendet."
+    else
+        log_status "NotOK" "E-Mail-Versand für $curr fehlgeschlagen."
+    fi
+}
     
     # Falls Datei nicht existiert oder leer ist (nur Header), abbrechen
     [[ ! -f "$csv_file" || $(wc -l < "$csv_file") -lt 2 ]] && return
